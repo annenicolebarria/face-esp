@@ -2,7 +2,6 @@ services:
   - type: web
     name: ptc-admin-web
     runtime: static
-    plan: free
     autoDeploy: true
     buildCommand: cd face-vite && npm ci && npm run build
     staticPublishPath: ./face-vite/dist
@@ -10,7 +9,6 @@ services:
   - type: web
     name: ptc-face-api
     runtime: node
-    plan: free
     autoDeploy: true
     buildCommand: cd face-api && npm ci
     startCommand: cd face-api && npm start
@@ -30,7 +28,6 @@ services:
   - type: web
     name: ptc-face-recognition
     runtime: docker
-    plan: free
     autoDeploy: true
     dockerfilePath: ./face-recognition-service/Dockerfile
     dockerContext: ./face-recognition-service
