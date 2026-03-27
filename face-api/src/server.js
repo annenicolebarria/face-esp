@@ -35,7 +35,7 @@ const enrollmentUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     files: 10,
-    fileSize: 6 * 1024 * 1024,
+    fileSize: 12 * 1024 * 1024,
   },
   fileFilter(req, file, callback) {
     if (String(file.mimetype || '').startsWith('image/')) {
@@ -341,7 +341,7 @@ async function getCameraSummaryRows() {
       c.camera_id AS "cameraId",
       c.area,
       CASE
-        WHEN COALESCE(logs.last_detected_at, c.last_seen_at) >= NOW() - INTERVAL '30 seconds'
+        WHEN COALESCE(logs.last_detected_at, c.last_seen_at) >= NOW() - INTERVAL '2 minutes'
           THEN 'online'
         ELSE 'offline'
       END AS status,
@@ -1751,6 +1751,34 @@ app.post('/api/admin/fan-state', async (req, res) => {
   } finally {
     client.release()
   }
+})
+
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        message: 'Each face image must be 12 MB or smaller.',
+      })
+    }
+
+    if (error.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({
+        message: 'Upload up to 10 face images at a time.',
+      })
+    }
+
+    return res.status(400).json({
+      message: error.message || 'Face image upload failed.',
+    })
+  }
+
+  if (error) {
+    return res.status(500).json({
+      message: error.message || 'Unexpected server error.',
+    })
+  }
+
+  return next()
 })
 
 app.use((req, res) => {
