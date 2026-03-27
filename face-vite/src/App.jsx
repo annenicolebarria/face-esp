@@ -23,7 +23,9 @@ const FACE_API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
   (typeof window === 'undefined'
     ? 'http://127.0.0.1:4000'
-    : `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${window.location.hostname}:4000`)
+    : window.location.hostname.endsWith('vercel.app')
+      ? 'https://ptc-face-api.onrender.com'
+      : `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${window.location.hostname}:4000`)
 
 async function rpcRequest(functionName, body = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${functionName}`, {
