@@ -329,73 +329,88 @@ async def recognize(
     number_of_times_to_upsample=RECOGNITION_UPSAMPLE_TIMES,
     model="hog",
   )
-  if len(face_locations) != 1:
-    save_path = save_unknown_image(image_bytes, camera_id)
+  if len(face_locations) == 0:
+    return {
+      "matched": False,
+      "ignored": True,
+      "reason": "no face detected",
+      "facesDetected": 0,
+    }
+  encodings = face_recognition.face_encodings(image, face_locations)
+  if not encodings:
+    return {
+      "matched": False,
+      "ignored": True,
+      "reason": "face detected but encoding failed",
+      "facesDetected": 1,
+    }
+
+  known_encodings = np.array([face.encoding for face in known_faces])
+  results: list[dict] = []
+  unknown_save_path: Optional[str] = None
+
+  for probe in encodings:
+    distances = face_recognition.face_distance(known_encodings, probe)
+    best_index = int(np.argmin(distances))
+    best_distance = float(distances[best_index])
+    best_face = known_faces[best_index]
+    matched = best_distance <= MATCH_THRESHOLD
+    confidence = confidence_from_distance(best_distance)
+    detected_at = datetime.now(timezone.utc).isoformat()
+
+    if matched:
+      payload = {
+        "userId": best_face.user_id,
+        "userNameSnapshot": best_face.label,
+        "cameraId": camera_id,
+        "event": "entry",
+        "confidence": confidence,
+        "detectedAt": detected_at,
+      }
+      log_row = post_camera_log(payload)
+      results.append({
+        "matched": True,
+        "userId": best_face.user_id,
+        "label": best_face.label,
+        "distance": round(best_distance, 4),
+        "confidence": confidence,
+        "log": log_row,
+      })
+      continue
+
+    if unknown_save_path is None:
+      unknown_save_path = save_unknown_image(image_bytes, camera_id)
+
     payload = {
       "userId": None,
       "userNameSnapshot": "Unknown Face",
       "cameraId": camera_id,
       "event": "unrecognized",
-      "confidence": 0,
-      "detectedAt": datetime.now(timezone.utc).isoformat(),
-    }
-    log_row = post_camera_log(payload)
-    return {
-      "matched": False,
-      "reason": "expected exactly one face",
-      "facesDetected": len(face_locations),
-      "savedImage": save_path,
-      "log": log_row,
-    }
-
-  encodings = face_recognition.face_encodings(image, face_locations)
-  if not encodings:
-    raise HTTPException(status_code=400, detail="Face detected but encoding failed.")
-
-  probe = encodings[0]
-  known_encodings = np.array([face.encoding for face in known_faces])
-  distances = face_recognition.face_distance(known_encodings, probe)
-  best_index = int(np.argmin(distances))
-  best_distance = float(distances[best_index])
-  best_face = known_faces[best_index]
-
-  matched = best_distance <= MATCH_THRESHOLD
-  confidence = confidence_from_distance(best_distance)
-
-  if matched:
-    payload = {
-      "userId": best_face.user_id,
-      "userNameSnapshot": best_face.label,
-      "cameraId": camera_id,
-      "event": "entry",
       "confidence": confidence,
-      "detectedAt": datetime.now(timezone.utc).isoformat(),
+      "detectedAt": detected_at,
     }
     log_row = post_camera_log(payload)
-    return {
-      "matched": True,
-      "userId": best_face.user_id,
+    results.append({
+      "matched": False,
       "label": best_face.label,
       "distance": round(best_distance, 4),
       "confidence": confidence,
+      "savedImage": unknown_save_path,
       "log": log_row,
-    }
+    })
 
-  save_path = save_unknown_image(image_bytes, camera_id)
-  payload = {
-    "userId": None,
-    "userNameSnapshot": "Unknown Face",
-    "cameraId": camera_id,
-    "event": "unrecognized",
-    "confidence": confidence,
-    "detectedAt": datetime.now(timezone.utc).isoformat(),
+  recognized_count = sum(1 for result in results if result["matched"])
+  unrecognized_count = len(results) - recognized_count
+  response = {
+    "matched": recognized_count > 0,
+    "facesDetected": len(face_locations),
+    "facesEncoded": len(encodings),
+    "recognizedCount": recognized_count,
+    "unrecognizedCount": unrecognized_count,
+    "results": results,
   }
-  log_row = post_camera_log(payload)
-  return {
-    "matched": False,
-    "label": best_face.label,
-    "distance": round(best_distance, 4),
-    "confidence": confidence,
-    "savedImage": save_path,
-    "log": log_row,
-  }
+
+  if len(results) == 1:
+    response.update(results[0])
+
+  return response

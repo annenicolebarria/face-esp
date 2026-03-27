@@ -526,6 +526,97 @@ exception
 end;
 $$;
 
+create or replace function public.admin_set_fan_state(
+  session_token text,
+  next_is_on boolean
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  admin_id bigint;
+  admin_row public.admins%rowtype;
+  current_is_on boolean;
+  state_changed boolean;
+  event_row public.fan_events%rowtype;
+  result_row public.fan_state%rowtype;
+begin
+  admin_id := public.admin_assert_session(session_token);
+
+  select *
+  into admin_row
+  from public.admins
+  where id = admin_id
+  limit 1;
+
+  insert into public.fan_state (device_key, is_on, updated_at, updated_by_label)
+  values ('main_fan', false, now(), 'system')
+  on conflict (device_key) do nothing;
+
+  select is_on
+  into current_is_on
+  from public.fan_state
+  where device_key = 'main_fan'
+  limit 1
+  for update;
+
+  state_changed := current_is_on is distinct from next_is_on;
+
+  insert into public.fan_state (
+    device_key,
+    is_on,
+    updated_at,
+    updated_by_user_id,
+    updated_by_label
+  )
+  values (
+    'main_fan',
+    next_is_on,
+    now(),
+    null,
+    coalesce(admin_row.username, 'system')
+  )
+  on conflict (device_key)
+  do update set
+    is_on = excluded.is_on,
+    updated_at = now(),
+    updated_by_user_id = excluded.updated_by_user_id,
+    updated_by_label = excluded.updated_by_label
+  returning *
+  into result_row;
+
+  insert into public.fan_events (
+    device_key,
+    is_on,
+    updated_by_user_id,
+    updated_by_label
+  )
+  values (
+    'main_fan',
+    next_is_on,
+    null,
+    coalesce(admin_row.username, 'system')
+  )
+  returning *
+  into event_row;
+
+  return jsonb_build_object(
+    'isOn', result_row.is_on,
+    'updatedAt', result_row.updated_at,
+    'updatedBy', result_row.updated_by_label,
+    'stateChanged', state_changed,
+    'event', jsonb_build_object(
+      'id', event_row.id,
+      'isOn', event_row.is_on,
+      'by', event_row.updated_by_label,
+      'at', event_row.created_at
+    )
+  );
+end;
+$$;
+
 grant execute on function public.admin_login(text, text) to anon, authenticated;
 grant execute on function public.admin_logout(text) to anon, authenticated;
 grant execute on function public.admin_validate_session(text) to anon, authenticated;
@@ -538,3 +629,4 @@ grant execute on function public.admin_update_user(text, bigint, text, text) to 
 grant execute on function public.admin_delete_user(text, bigint) to anon, authenticated;
 grant execute on function public.admin_create_user(text, text, text, text, text, text, text, text) to anon, authenticated;
 grant execute on function public.admin_update_credentials(text, text, text, text) to anon, authenticated;
+grant execute on function public.admin_set_fan_state(text, boolean) to anon, authenticated;

@@ -587,20 +587,10 @@ function App() {
     setFanControlFeedback({ type: '', message: '' })
 
     try {
-      const response = await fetch(`${FACE_API_BASE_URL}/api/admin/fan-state`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-session': adminToken,
-        },
-        body: JSON.stringify({ isOn: nextIsOn }),
+      const payload = await rpcRequest('admin_set_fan_state', {
+        session_token: adminToken,
+        next_is_on: nextIsOn,
       })
-
-      const payload = await response.json().catch(() => ({}))
-
-      if (!response.ok) {
-        throw new Error(payload?.message || 'Failed to update fan state.')
-      }
 
       applyFanState(payload)
       setFanControlFeedback({
