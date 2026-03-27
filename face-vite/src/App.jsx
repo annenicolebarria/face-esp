@@ -653,10 +653,10 @@ function App() {
     })
 
     setIsEnrollmentSubmitting(true)
-    setEnrollmentLoadingMessage('Uploading face images and reloading recognition dataset...')
+    setEnrollmentLoadingMessage('Uploading face images to cloud storage and reloading recognition dataset...')
     setEnrollmentFeedback({
       type: '',
-      message: 'Uploading face images and reloading recognition dataset...',
+      message: 'Uploading face images to cloud storage and reloading recognition dataset...',
     })
 
     try {
@@ -1744,7 +1744,7 @@ function App() {
               </div>
               <p className="panel-note">
                 Upload 1 to 10 clear images for <strong>{selectedEnrollmentUser.name}</strong>. New uploads are
-                added to the existing dataset folder automatically, then face recognition reloads.
+                added to the live dataset automatically, then face recognition reloads.
               </p>
               <form className="account-form" onSubmit={handleFaceEnrollmentSubmit}>
                 <div className="field">

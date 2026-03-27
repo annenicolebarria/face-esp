@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -101,20 +102,79 @@ def parse_user_folder(folder_name: str) -> tuple[Optional[int], str]:
   return user_id, label
 
 
+def fetch_remote_dataset_manifest() -> dict:
+  if not CAMERA_SHARED_TOKEN:
+    print("[DATASET] Skipping remote manifest: CAMERA_SHARED_TOKEN is not configured.")
+    return {"activeUserIds": set(), "remoteUsers": {}}
+
+  try:
+    response = requests.get(
+      f"{FACE_API_URL}/api/internal/face-enrollment-dataset",
+      headers={"x-camera-token": CAMERA_SHARED_TOKEN},
+      timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+  except requests.RequestException as exc:
+    print(f"[DATASET] Remote manifest unavailable: {exc}")
+    return {"activeUserIds": set(), "remoteUsers": {}}
+
+  remote_users: dict[int, dict] = {}
+  for row in payload.get("images", []):
+    try:
+      user_id = int(row.get("userId"))
+    except (TypeError, ValueError):
+      continue
+
+    public_url = str(row.get("publicUrl") or "").strip()
+    if not public_url:
+      continue
+
+    label = str(row.get("label") or "").strip() or f"User {user_id}"
+    remote_users.setdefault(user_id, {"label": label, "images": []})["images"].append(
+      {
+        "publicUrl": public_url,
+        "captureOrder": int(row.get("captureOrder") or 0),
+      }
+    )
+
+  for user_info in remote_users.values():
+    user_info["images"].sort(key=lambda image: image["captureOrder"])
+
+  active_user_ids = {
+    int(user_id)
+    for user_id in payload.get("activeUserIds", [])
+    if str(user_id).isdigit()
+  }
+
+  return {
+    "activeUserIds": active_user_ids,
+    "remoteUsers": remote_users,
+  }
+
+
 def load_known_faces() -> dict[str, int]:
   loaded_faces: list[KnownFace] = []
   image_count = 0
+  remote_manifest = fetch_remote_dataset_manifest()
+  active_user_ids: set[int] = remote_manifest["activeUserIds"]
+  remote_users: dict[int, dict] = remote_manifest["remoteUsers"]
+  remote_user_ids = set(remote_users.keys())
 
   if not DATASET_DIR.exists():
-    with KNOWN_FACES_LOCK:
-      KNOWN_FACES.clear()
-    return {"persons": 0, "images": 0}
+    DATASET_DIR.mkdir(parents=True, exist_ok=True)
 
   for person_dir in sorted(DATASET_DIR.iterdir()):
     if not person_dir.is_dir():
       continue
 
     user_id, label = parse_user_folder(person_dir.name)
+    if user_id is not None:
+      if active_user_ids and user_id not in active_user_ids:
+        continue
+      if user_id in remote_user_ids:
+        continue
+
     loaded_for_person = 0
 
     for image_path in sorted(person_dir.iterdir()):
@@ -142,11 +202,36 @@ def load_known_faces() -> dict[str, int]:
       except Exception:
         continue
 
+  for user_id, remote_user in sorted(remote_users.items()):
+    loaded_for_person = 0
+
+    for image_info in remote_user["images"]:
+      if loaded_for_person >= MAX_IMAGES_PER_PERSON:
+        break
+
+      encoding = extract_remote_face_encoding(image_info["publicUrl"])
+      if encoding is None:
+        continue
+
+      try:
+        loaded_faces.append(
+          KnownFace(
+            user_id=user_id,
+            label=remote_user["label"],
+            image_path=image_info["publicUrl"],
+            encoding=encoding,
+          )
+        )
+        image_count += 1
+        loaded_for_person += 1
+      except Exception:
+        continue
+
   with KNOWN_FACES_LOCK:
     KNOWN_FACES.clear()
     KNOWN_FACES.extend(loaded_faces)
 
-  persons = len({face.label for face in loaded_faces})
+  persons = len({(face.user_id, face.label) for face in loaded_faces})
   return {"persons": persons, "images": image_count}
 
 
@@ -183,6 +268,29 @@ def extract_face_encoding(image_path: Path) -> Optional[np.ndarray]:
     return np.array(json.loads(payload), dtype=np.float64)
   except Exception:
     return None
+
+
+def extract_remote_face_encoding(public_url: str) -> Optional[np.ndarray]:
+  try:
+    response = requests.get(public_url, timeout=30)
+    response.raise_for_status()
+  except requests.RequestException as exc:
+    print(f"[DATASET] Failed to download remote face image: {exc}")
+    return None
+
+  temp_path: Optional[Path] = None
+  try:
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
+      handle.write(response.content)
+      temp_path = Path(handle.name)
+
+    return extract_face_encoding(temp_path)
+  finally:
+    if temp_path is not None:
+      try:
+        temp_path.unlink(missing_ok=True)
+      except Exception:
+        pass
 
 
 def update_dataset_state(**updates: object) -> None:

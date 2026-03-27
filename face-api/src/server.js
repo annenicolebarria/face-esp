@@ -4,21 +4,28 @@ const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
 const multer = require('multer')
-const fs = require('fs/promises')
-const path = require('path')
 const { pool, query } = require('./db')
 const { signAdminToken, signUserToken, requireAuth, requireRole } = require('./auth')
 
 const app = express()
 
 const port = Number(process.env.PORT || 4000)
+const isProduction = process.env.NODE_ENV === 'production'
 const cameraSharedToken = String(process.env.CAMERA_SHARED_TOKEN || '').trim()
 const deviceSharedToken = String(process.env.DEVICE_SHARED_TOKEN || cameraSharedToken).trim()
-const faceDatasetDir = path.resolve(
-  process.env.FACE_DATASET_DIR || path.join(__dirname, '../../face-recognition-service/dataset')
-)
+const supabaseUrl = String(
+  process.env.SUPABASE_URL || 'https://ofvkhrqmswxzdikzsfsw.supabase.co'
+).replace(/\/+$/, '')
+const supabaseStorageApiKey = String(
+  process.env.SUPABASE_STORAGE_API_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    'sb_publishable_9MoVy3d-me0pPvY9T9FGUQ_cmCJVNwZ'
+).trim()
+const faceEnrollmentBucket = String(process.env.FACE_ENROLLMENT_BUCKET || 'face-enrollment').trim()
 const recognitionServiceUrl = String(
-  process.env.RECOGNITION_SERVICE_URL || 'http://127.0.0.1:8001'
+  process.env.RECOGNITION_SERVICE_URL ||
+    (isProduction ? 'https://ptc-face-recognition.onrender.com' : 'http://127.0.0.1:8001')
 ).replace(/\/+$/, '')
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .split(',')
@@ -121,6 +128,53 @@ function buildDatasetFolderName(userRow) {
   return [userRow.id, firstName, lastName].filter(Boolean).join('_')
 }
 
+function encodeStorageObjectPath(storagePath) {
+  return String(storagePath || '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+}
+
+function buildFaceEnrollmentPublicUrl(storagePath) {
+  return `${supabaseUrl}/storage/v1/object/public/${faceEnrollmentBucket}/${encodeStorageObjectPath(storagePath)}`
+}
+
+async function ensureFaceEnrollmentBucket() {
+  await query(
+    `INSERT INTO storage.buckets (id, name, public)
+     VALUES ($1, $1, true)
+     ON CONFLICT (id) DO UPDATE
+     SET public = EXCLUDED.public`,
+    [faceEnrollmentBucket]
+  )
+}
+
+async function uploadEnrollmentImageToStorage(storagePath, file) {
+  if (!supabaseStorageApiKey || !supabaseUrl) {
+    throw new Error('Supabase storage is not configured.')
+  }
+
+  const objectPath = encodeStorageObjectPath(storagePath)
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/${faceEnrollmentBucket}/${objectPath}`, {
+    method: 'POST',
+    headers: {
+      apikey: supabaseStorageApiKey,
+      Authorization: `Bearer ${supabaseStorageApiKey}`,
+      'Content-Type': file.mimetype || 'application/octet-stream',
+      'x-upsert': 'true',
+    },
+    body: file.buffer,
+  })
+
+  if (!response.ok) {
+    const payload = await response.text().catch(() => '')
+    throw new Error(
+      payload || `Supabase storage upload failed with status ${response.status}.`
+    )
+  }
+}
+
 async function assertAdminSession(sessionToken) {
   if (!sessionToken) {
     const error = new Error('Admin session is required.')
@@ -164,37 +218,16 @@ async function reloadRecognitionDataset() {
 }
 
 async function saveEnrollmentImages(userRow, files) {
-  await fs.mkdir(faceDatasetDir, { recursive: true })
-
   const targetFolderName = buildDatasetFolderName(userRow)
-  const targetFolder = path.join(faceDatasetDir, targetFolderName)
+  await ensureFaceEnrollmentBucket()
 
-  const existingEntries = await fs.readdir(faceDatasetDir, { withFileTypes: true })
-  const staleFolders = existingEntries.filter(
-    (entry) =>
-      entry.isDirectory() &&
-      entry.name.startsWith(`${userRow.id}_`) &&
-      entry.name !== targetFolderName
-  )
-
-  await Promise.all(
-    staleFolders.map((entry) => fs.rm(path.join(faceDatasetDir, entry.name), { recursive: true, force: true }))
-  )
-
-  await fs.mkdir(targetFolder, { recursive: true })
-
-  const existingFiles = await fs.readdir(targetFolder, { withFileTypes: true })
-  const imageFileCount = existingFiles.filter((entry) => entry.isFile()).length
   const existingOrderResult = await query(
     `SELECT COALESCE(MAX(capture_order), 0)::int AS "maxOrder"
      FROM public.face_enrollment_images
      WHERE user_id = $1`,
     [userRow.id]
   )
-  const startingOrder = Math.max(
-    imageFileCount,
-    Number(existingOrderResult.rows[0]?.maxOrder || 0)
-  )
+  const startingOrder = Number(existingOrderResult.rows[0]?.maxOrder || 0)
 
   const metadataRows = []
 
@@ -202,15 +235,17 @@ async function saveEnrollmentImages(userRow, files) {
     const order = startingOrder + index + 1
     const extension = getDatasetExtension(file)
     const filename = `${String(order).padStart(2, '0')}${extension}`
-    const storagePath = path.join(targetFolder, filename)
+    const storagePath = `${targetFolderName}/${filename}`
+    const publicUrl = buildFaceEnrollmentPublicUrl(storagePath)
 
-    await fs.writeFile(storagePath, file.buffer)
+    await uploadEnrollmentImageToStorage(storagePath, file)
 
     metadataRows.push({
       poseKey: `image_${String(order).padStart(4, '0')}`,
       poseLabel: `Image ${order}`,
       captureOrder: order,
-      storagePath: `${targetFolderName}/${filename}`,
+      storagePath,
+      publicUrl,
       contentType: file.mimetype || 'image/jpeg',
       fileSize: file.size || file.buffer.length,
     })
@@ -227,13 +262,14 @@ async function saveEnrollmentImages(userRow, files) {
         public_url,
         content_type,
         file_size
-      ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         userRow.id,
         row.poseKey,
         row.poseLabel,
         row.captureOrder,
         row.storagePath,
+        row.publicUrl,
         row.contentType,
         row.fileSize,
       ]
@@ -248,19 +284,47 @@ async function saveEnrollmentImages(userRow, files) {
 }
 
 async function removeEnrollmentDataset(userRow) {
-  await fs.mkdir(faceDatasetDir, { recursive: true })
-  const entries = await fs.readdir(faceDatasetDir, { withFileTypes: true })
-  const matchingFolders = entries.filter(
-    (entry) => entry.isDirectory() && entry.name.startsWith(`${userRow.id}_`)
+  const datasetRows = await query(
+    `SELECT storage_path
+     FROM public.face_enrollment_images
+     WHERE user_id = $1`,
+    [userRow.id]
   )
 
-  await Promise.all(
-    matchingFolders.map((entry) =>
-      fs.rm(path.join(faceDatasetDir, entry.name), { recursive: true, force: true })
-    )
-  )
+  await query('DELETE FROM public.face_enrollment_images WHERE user_id = $1', [userRow.id])
 
-  return matchingFolders.map((entry) => entry.name)
+  return [...new Set(datasetRows.rows
+    .map((row) => String(row.storage_path || '').split('/')[0])
+    .filter(Boolean))]
+}
+
+async function getFaceEnrollmentDatasetManifest() {
+  const [usersResult, imagesResult] = await Promise.all([
+    query('SELECT id FROM public.users ORDER BY id ASC'),
+    query(
+      `SELECT
+        i.user_id AS "userId",
+        u.first_name AS "firstName",
+        u.last_name AS "lastName",
+        i.capture_order AS "captureOrder",
+        i.storage_path AS "storagePath",
+        i.public_url AS "publicUrl"
+      FROM public.face_enrollment_images i
+      JOIN public.users u ON u.id = i.user_id
+      ORDER BY i.user_id ASC, i.capture_order ASC`
+    ),
+  ])
+
+  return {
+    activeUserIds: usersResult.rows.map((row) => Number(row.id)).filter(Number.isFinite),
+    images: imagesResult.rows.map((row) => ({
+      userId: Number(row.userId),
+      label: [row.firstName, row.lastName].filter(Boolean).join(' ').trim(),
+      captureOrder: Number(row.captureOrder || 0),
+      storagePath: row.storagePath,
+      publicUrl: row.publicUrl || buildFaceEnrollmentPublicUrl(row.storagePath),
+    })),
+  }
 }
 
 async function ensureCoreSystemRows() {
@@ -1557,12 +1621,27 @@ app.post('/api/admin/face-enrollment', enrollmentUpload.array('images', 10), asy
       userId,
       folderName: enrollment.folderName,
       imagesSaved: enrollment.imageCount,
+      totalImages: enrollment.totalImages,
       reload: reloadResult,
     })
   } catch (error) {
     const statusCode = error.statusCode || 500
     return res.status(statusCode).json({
       message: error.message || 'Failed to enroll face images.',
+    })
+  }
+})
+
+app.get('/api/internal/face-enrollment-dataset', requireCameraToken, async (req, res) => {
+  try {
+    return res.json({
+      ok: true,
+      ...(await getFaceEnrollmentDatasetManifest()),
+    })
+  } catch (error) {
+    return res.status(500).json({
+      message: 'Failed to load face enrollment dataset manifest.',
+      detail: error.message,
     })
   }
 })

@@ -68,3 +68,10 @@ on storage.objects
 for select
 to anon, authenticated
 using (bucket_id = 'face-enrollment');
+
+drop policy if exists storage_face_enrollment_delete on storage.objects;
+create policy storage_face_enrollment_delete
+on storage.objects
+for delete
+to anon, authenticated
+using (bucket_id = 'face-enrollment');
