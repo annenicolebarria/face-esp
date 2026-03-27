@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "PTC User Panel",
+    "slug": "ptc-user-panel",
+    "version": "1.0.0",
+    "description": "Installable user dashboard for the PTC Smart Faculty Office system.",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "backgroundColor": "#0E2F25",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0E2F25"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.ptc.userpanel",
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "PTC User Panel",
+      "shortName": "PTC User",
+      "description": "Installable web app for faculty user monitoring, notifications, logs, and device control.",
+      "lang": "en",
+      "scope": "/",
+      "themeColor": "#0E2F25",
+      "backgroundColor": "#0E2F25",
+      "display": "standalone",
+      "startUrl": "/",
+      "splash": {
+        "image": "./assets/splash-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0E2F25"
+      }
+    }
+  }
+}

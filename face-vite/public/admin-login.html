@@ -1,0 +1,105 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Log In | PTC Smart Faculty Office</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="admin-page">
+  <main class="admin-shell admin-animate">
+    <section class="admin-card admin-card--single">
+      <div class="admin-right">
+        <div class="admin-form">
+          <h1>Welcome</h1>
+          <p>Please log in to admin dashboard.</p>
+          <form id="admin-login-form">
+            <label class="contact-label" for="username">Username</label>
+            <input id="username" name="username" type="text" placeholder="Username" required />
+
+            <label class="contact-label" for="password">Password</label>
+            <input id="password" name="password" type="password" placeholder="Password" required />
+
+            <button class="btn btn--primary" type="submit">Log In</button>
+            <a class="admin-link" href="#">Forgotten your password?</a>
+            <a
+              id="go-back-website"
+              class="admin-link admin-back-link"
+              href="/"
+            >
+              Go Back to Website
+            </a>
+            <p id="login-error" class="admin-link" style="display:none; color:#ffb3b3; margin-top:10px;">
+              Invalid username or password.
+            </p>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    const SUPABASE_URL = 'https://ofvkhrqmswxzdikzsfsw.supabase.co'
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_9MoVy3d-me0pPvY9T9FGUQ_cmCJVNwZ'
+    const form = document.getElementById('admin-login-form')
+    const goBackLink = document.getElementById('go-back-website')
+    const usernameInput = document.getElementById('username')
+    const passwordInput = document.getElementById('password')
+    const errorText = document.getElementById('login-error')
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+
+      const username = usernameInput.value.trim()
+      const password = passwordInput.value.trim()
+      errorText.style.display = 'none'
+
+      try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/admin_login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_PUBLISHABLE_KEY,
+            Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            login_username: username,
+            login_password: password,
+          }),
+        })
+        const payload = await response.json().catch(() => ({}))
+
+        if (!response.ok) {
+          throw new Error(payload?.message || payload?.msg || 'Invalid username or password.')
+        }
+
+        sessionStorage.setItem('adminAuth', 'true')
+        sessionStorage.setItem('adminToken', payload.token)
+        sessionStorage.setItem('adminUsername', payload.admin?.username || username)
+
+        await Swal.fire({
+          icon: 'success',
+          title: 'Login Successful',
+          text: 'Welcome to the admin dashboard.',
+          timer: 1100,
+          showConfirmButton: false,
+          timerProgressBar: true,
+        })
+        window.location.href = '/admin.html'
+      } catch (error) {
+        errorText.textContent = error.message || 'Invalid username or password.'
+        errorText.style.display = 'block'
+      }
+    })
+
+    goBackLink.addEventListener('click', (event) => {
+      event.preventDefault()
+      window.location.href = '/'
+    })
+  </script>
+</body>
+</html>

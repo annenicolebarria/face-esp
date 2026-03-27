@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: ptc-admin-web
+    runtime: static
+    plan: free
+    autoDeploy: true
+    buildCommand: cd face-vite && npm ci && npm run build
+    staticPublishPath: ./face-vite/dist
+
+  - type: web
+    name: ptc-face-api
+    runtime: node
+    plan: free
+    autoDeploy: true
+    buildCommand: cd face-api && npm ci
+    startCommand: cd face-api && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: CAMERA_SHARED_TOKEN
+        sync: false
+      - key: DEVICE_SHARED_TOKEN
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://ptc-admin-web.onrender.com,http://localhost:5173
+
+  - type: web
+    name: ptc-face-recognition
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    dockerfilePath: ./face-recognition-service/Dockerfile
+    dockerContext: ./face-recognition-service
+    healthCheckPath: /health
+    envVars:
+      - key: FACE_API_URL
+        sync: false
+      - key: CAMERA_SHARED_TOKEN
+        sync: false
+      - key: DATASET_DIR
+        value: ./dataset
+      - key: UNKNOWN_SAVE_DIR
+        value: ./captures/unrecognized
+      - key: MATCH_THRESHOLD
+        value: 0.50
+      - key: MAX_IMAGES_PER_PERSON
+        value: 4
+      - key: MAX_IMAGE_DIMENSION
+        value: 640
+      - key: RECOGNITION_UPSAMPLE_TIMES
+        value: 1
+      - key: CORS_ORIGINS
+        value: https://ptc-admin-web.onrender.com,http://localhost:5173

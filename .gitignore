@@ -1,0 +1,44 @@
+.runtime-logs/
+
+# Node / web builds
+**/node_modules/
+**/dist/
+**/build/
+.vite/
+
+# Expo / React Native local outputs
+app/.expo/
+app/.tmp-export/
+app/.tmp-latest/
+app/android/.gradle/
+app/android/.cxx/
+app/android/local.properties
+app/android/app/build/
+app/android/build/
+
+# Python virtualenvs / caches
+**/.venv*/
+**/__pycache__/
+*.pyc
+
+# Local env files
+**/.env
+
+# Logs
+*.log
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+
+# Local capture outputs
+face-recognition-service/captures/
+
+# Local git metadata backups
+*.git-backup/
+
+# Unrelated archives / docs
+*.zip
+*.pdf
+capstone_extracted.txt
+here-*/

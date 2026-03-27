@@ -1,0 +1,8 @@
+.env
+.venv310
+.venv311
+__pycache__
+*.pyc
+captures
+uvicorn.err.log
+uvicorn.out.log

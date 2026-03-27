@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Install PTC User App</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="install-page">
+  <header class="top-bar">
+    <div class="top-bar-inner">
+      <div class="hero-logo">
+        <img src="/assets/img/logo.png" alt="PTC Logo" />
+        <span>PTC Smart Faculty Office</span>
+      </div>
+      <nav class="hero-links">
+        <a href="/index.html">Website</a>
+        <a href="#steps">Install Steps</a>
+        <a href="#platforms">Platforms</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="install-main">
+    <section class="install-hero">
+      <div class="container install-hero__grid">
+        <div class="install-copy" data-reveal>
+          <p class="hero-eyebrow">User App Guide</p>
+          <h1>Install the user app on phone or desktop.</h1>
+          <p class="install-lead">
+            Open the PWA app first, then use your browser's install option. This guide keeps the website separate
+            from the actual user app.
+          </p>
+          <div class="hero-actions install-actions">
+            <a class="btn btn--primary" id="open-app-link" href="/app" target="_blank" rel="noreferrer">
+              Open App
+            </a>
+            <button class="btn btn--outline" id="copy-app-link" type="button">Copy App Link</button>
+            <a class="btn btn--outline" href="/index.html">Back to Website</a>
+          </div>
+          <p class="install-note" id="app-link-note">
+            Default app URL: <span id="app-link-text">/app</span>
+          </p>
+        </div>
+
+        <aside class="install-card" data-reveal>
+          <p class="install-card__eyebrow">Quick Flow</p>
+          <ol class="install-list install-list--ordered">
+            <li>Open the app using the button above.</li>
+            <li>Wait for the app page to load completely.</li>
+            <li>Use the browser install option or Add to Home Screen.</li>
+            <li>Launch the installed app from your desktop or phone home screen.</li>
+          </ol>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section section--alt" id="steps">
+      <div class="container">
+        <div class="install-section-head" data-reveal>
+          <p class="services-eyebrow">Install Steps</p>
+          <h2>What the user should do</h2>
+          <p>
+            The install action happens on the PWA app itself, not on the website. Use this page as the landing guide.
+          </p>
+        </div>
+
+        <div class="install-steps">
+          <article class="install-step" data-reveal>
+            <span class="install-step__num">1</span>
+            <h3>Open the PWA app</h3>
+            <p>Click <strong>Open App</strong>. That loads the actual installable user app.</p>
+          </article>
+          <article class="install-step" data-reveal>
+            <span class="install-step__num">2</span>
+            <h3>Look for the install option</h3>
+            <p>Check the address bar icon, browser menu, or mobile browser share menu.</p>
+          </article>
+          <article class="install-step" data-reveal>
+            <span class="install-step__num">3</span>
+            <h3>Add it to the device</h3>
+            <p>Install it so the app launches in its own window like a normal app.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="platforms">
+      <div class="container">
+        <div class="install-section-head" data-reveal>
+          <p class="services-eyebrow">Platform Guides</p>
+          <h2>Browser-specific instructions</h2>
+        </div>
+
+        <div class="install-platforms">
+          <article class="install-platform-card" data-reveal>
+            <h3>Chrome or Edge on Desktop</h3>
+            <ul class="install-list">
+              <li>Open the PWA app page.</li>
+              <li>Look for the install icon in the address bar.</li>
+              <li>If there is no icon, open the browser menu and choose <strong>Install app</strong> or <strong>Apps</strong>.</li>
+            </ul>
+          </article>
+
+          <article class="install-platform-card" data-reveal>
+            <h3>Android Chrome</h3>
+            <ul class="install-list">
+              <li>Open the PWA app page in Chrome.</li>
+              <li>Tap the three-dot menu.</li>
+              <li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+            </ul>
+          </article>
+
+          <article class="install-platform-card" data-reveal>
+            <h3>iPhone Safari</h3>
+            <ul class="install-list">
+              <li>Open the PWA app page in Safari.</li>
+              <li>Tap the <strong>Share</strong> button.</li>
+              <li>Choose <strong>Add to Home Screen</strong>, then confirm.</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/assets/js/main.js"></script>
+  <script>
+    const defaultAppUrl = '/app'
+    const appUrl = new URLSearchParams(window.location.search).get('appUrl') || defaultAppUrl
+    const openAppLink = document.getElementById('open-app-link')
+    const appLinkText = document.getElementById('app-link-text')
+    const copyButton = document.getElementById('copy-app-link')
+    const note = document.getElementById('app-link-note')
+
+    openAppLink.href = appUrl
+    appLinkText.textContent = appUrl
+
+    copyButton.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(appUrl)
+        note.textContent = `Copied app link: ${appUrl}`
+      } catch (error) {
+        note.textContent = `Copy failed. Use this link manually: ${appUrl}`
+      }
+    })
+  </script>
+</body>
+</html>
