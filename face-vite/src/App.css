@@ -329,6 +329,12 @@ body {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.fan-control-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(280px, 0.85fr);
+  gap: 14px;
+}
+
 .panel {
   background: var(--card);
   border-radius: 14px;
@@ -430,6 +436,60 @@ body {
   margin-top: 8px;
   font-size: 13px;
   color: var(--text-soft);
+}
+
+.fan-status-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  background: linear-gradient(180deg, #f9fffb, #eef8f2);
+}
+
+.fan-status-card p {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.fan-status-card strong {
+  display: block;
+  margin-top: 10px;
+  font-size: 28px;
+  font-family: 'Space Grotesk', 'Manrope', sans-serif;
+}
+
+.fan-status-card span {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.fan-control-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.fan-toggle-btn {
+  min-height: 48px;
+  font-size: 15px;
+}
+
+.fan-toggle-btn.active-on {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.48);
+}
+
+.fan-toggle-btn.fan-toggle-off {
+  background: linear-gradient(125deg, #d5544f, #e4756c);
+}
+
+.fan-toggle-btn.active-off {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.48);
 }
 
 .table-wrap {
@@ -1018,6 +1078,10 @@ button.secondary-button:disabled {
   }
 
   .panels {
+    grid-template-columns: 1fr;
+  }
+
+  .fan-control-grid {
     grid-template-columns: 1fr;
   }
 

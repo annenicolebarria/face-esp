@@ -5,6 +5,7 @@ import './App.css'
 const SECTIONS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'devices', label: 'Device Health' },
+  { id: 'fan', label: 'Fan Control' },
   { id: 'users', label: 'User Management' },
   { id: 'cctv', label: 'CCTV Monitoring' },
   { id: 'logs', label: 'Attendance Logs' },
@@ -19,9 +20,10 @@ const ACTIVE_SECTION_STORAGE_KEY = 'adminActiveSection'
 const SENSOR_STALE_MS = 15000
 const DEVICE_TEST_MIN_LOADING_MS = 2000
 const FACE_API_BASE_URL =
-  typeof window === 'undefined'
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window === 'undefined'
     ? 'http://127.0.0.1:4000'
-    : `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${window.location.hostname}:4000`
+    : `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${window.location.hostname}:4000`)
 
 async function rpcRequest(functionName, body = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${functionName}`, {
@@ -212,6 +214,18 @@ function SectionIcon({ id }) {
     )
   }
 
+  if (id === 'fan') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 12m-1.8 0a1.8 1.8 0 1 0 3.6 0 1.8 1.8 0 1 0-3.6 0" />
+        <path d="M12 4c2.7 0 4 1.8 4 3.3 0 2-1.7 3.1-4 4.7" />
+        <path d="M20 12c0 2.7-1.8 4-3.3 4-2 0-3.1-1.7-4.7-4" />
+        <path d="M12 20c-2.7 0-4-1.8-4-3.3 0-2 1.7-3.1 4-4.7" />
+        <path d="M4 12c0-2.7 1.8-4 3.3-4 2 0 3.1 1.7 4.7 4" />
+      </svg>
+    )
+  }
+
   if (id === 'cctv') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -294,6 +308,8 @@ function App() {
     toSensorSnapshot({})
   )
   const [isDeviceTestRunning, setIsDeviceTestRunning] = useState(false)
+  const [isFanSubmitting, setIsFanSubmitting] = useState(false)
+  const [fanControlFeedback, setFanControlFeedback] = useState({ type: '', message: '' })
   const [deviceTestState, setDeviceTestState] = useState({
     status: 'idle',
     badgeClass: 'offline',
@@ -546,6 +562,56 @@ function App() {
       })
     } finally {
       setIsDeviceTestRunning(false)
+    }
+  }
+
+  const applyFanState = (fanState) => {
+    setSensorSnapshot((current) => ({
+      ...current,
+      fanIsOn: Boolean(fanState?.isOn),
+      fanUpdatedAt: fanState?.updatedAt || new Date().toISOString(),
+      fanUpdatedBy: fanState?.updatedBy || current.fanUpdatedBy || 'system',
+    }))
+    setLastSync(new Date().toLocaleString())
+  }
+
+  const handleFanControl = async (nextIsOn) => {
+    const adminToken = sessionStorage.getItem('adminToken')
+    if (!adminToken || isFanSubmitting) {
+      return
+    }
+
+    setIsFanSubmitting(true)
+    setFanControlFeedback({ type: '', message: '' })
+
+    try {
+      const response = await fetch(`${FACE_API_BASE_URL}/api/admin/fan-state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-session': adminToken,
+        },
+        body: JSON.stringify({ isOn: nextIsOn }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(payload?.message || 'Failed to update fan state.')
+      }
+
+      applyFanState(payload)
+      setFanControlFeedback({
+        type: 'success',
+        message: `Fan command sent. Relay is now ${payload.isOn ? 'ON' : 'OFF'}.`,
+      })
+    } catch (error) {
+      setFanControlFeedback({
+        type: 'error',
+        message: error.message || 'Failed to update fan state.',
+      })
+    } finally {
+      setIsFanSubmitting(false)
     }
   }
 
@@ -1233,6 +1299,100 @@ function App() {
                     </div>
                     <span className={sensorHealth.fan.online ? 'badge online' : 'badge offline'}>
                       {sensorHealth.fan.label}
+                    </span>
+                  </li>
+                </ul>
+              </article>
+            </div>
+          </section>
+        )}
+
+        {activeSection === 'fan' && (
+          <section className="page-grid">
+            <div className="fan-control-grid">
+              <article className="panel fade-in">
+                <div className="panel-head">
+                  <h3>Fan Control</h3>
+                  <span className={sensorHealth.fan.online ? 'badge online' : 'badge offline'}>
+                    {sensorHealth.fan.label}
+                  </span>
+                </div>
+                <p className="panel-note">
+                  Send an ON or OFF command to the Acebott relay. The board applies the latest command on its next sync.
+                </p>
+
+                <div className="fan-status-card">
+                  <p>Current relay state</p>
+                  <strong>{sensorSnapshot.fanIsOn ? 'Fan ON' : 'Fan OFF'}</strong>
+                  <span>
+                    Last update by {sensorSnapshot.fanUpdatedBy || 'system'}
+                    {sensorSnapshot.fanUpdatedAt ? ` on ${new Date(sensorSnapshot.fanUpdatedAt).toLocaleString()}` : ''}
+                  </span>
+                </div>
+
+                <div className="fan-control-actions">
+                  <button
+                    type="button"
+                    className={`fan-toggle-btn ${sensorSnapshot.fanIsOn ? 'active-on' : ''}`}
+                    onClick={() => handleFanControl(true)}
+                    disabled={isFanSubmitting}
+                  >
+                    {isFanSubmitting && !sensorSnapshot.fanIsOn ? 'Sending...' : 'Turn On'}
+                  </button>
+                  <button
+                    type="button"
+                    className={`fan-toggle-btn fan-toggle-off ${!sensorSnapshot.fanIsOn ? 'active-off' : ''}`}
+                    onClick={() => handleFanControl(false)}
+                    disabled={isFanSubmitting}
+                  >
+                    {isFanSubmitting && sensorSnapshot.fanIsOn ? 'Sending...' : 'Turn Off'}
+                  </button>
+                </div>
+
+                {fanControlFeedback.message && (
+                  <p className={`account-feedback ${fanControlFeedback.type || 'success'}`}>
+                    {fanControlFeedback.message}
+                  </p>
+                )}
+              </article>
+
+              <article className="panel fade-in">
+                <h3>Relay Status</h3>
+                <ul className="camera-list">
+                  <li>
+                    <div>
+                      <strong>Acebott Heartbeat</strong>
+                      <p>{sensorHealth.heartbeatLabel}</p>
+                    </div>
+                    <span className={sensorHealth.pir.online ? 'badge online' : 'badge offline'}>
+                      {sensorHealth.pir.online ? 'online' : 'stale'}
+                    </span>
+                  </li>
+                  <li>
+                    <div>
+                      <strong>Fan Relay</strong>
+                      <p>{sensorHealth.fan.detail}</p>
+                    </div>
+                    <span className={sensorHealth.fan.online ? 'badge online' : 'badge offline'}>
+                      {sensorHealth.fan.label}
+                    </span>
+                  </li>
+                  <li>
+                    <div>
+                      <strong>PIR Motion</strong>
+                      <p>{sensorHealth.pir.detail}</p>
+                    </div>
+                    <span className={sensorHealth.pir.online ? 'badge online' : 'badge offline'}>
+                      {sensorHealth.pir.label}
+                    </span>
+                  </li>
+                  <li>
+                    <div>
+                      <strong>DHT Sensor</strong>
+                      <p>{sensorHealth.dht.detail}</p>
+                    </div>
+                    <span className={sensorHealth.dht.online ? 'badge online' : 'badge offline'}>
+                      {sensorHealth.dht.label}
                     </span>
                   </li>
                 </ul>

@@ -1611,6 +1611,69 @@ app.post('/api/admin/delete-user', async (req, res) => {
   }
 })
 
+app.get('/api/admin/fan-state', async (req, res) => {
+  const sessionToken = String(req.headers['x-admin-session'] || req.query.sessionToken || '').trim()
+
+  try {
+    await assertAdminSession(sessionToken)
+
+    const [fanState, sensorSnapshot] = await Promise.all([
+      getFanStateRow(),
+      getLatestSensorSnapshot('acebott-main-01'),
+    ])
+
+    return res.json({
+      isOn: Boolean(fanState?.isOn),
+      updatedAt: fanState?.updatedAt || null,
+      updatedBy: fanState?.updatedBy || 'system',
+      sensorSnapshot,
+    })
+  } catch (error) {
+    const statusCode = error.statusCode || 500
+    return res.status(statusCode).json({
+      message: error.message || 'Failed to fetch fan state.',
+    })
+  }
+})
+
+app.post('/api/admin/fan-state', async (req, res) => {
+  const sessionToken = String(req.headers['x-admin-session'] || req.body.sessionToken || '').trim()
+
+  if (typeof req.body.isOn !== 'boolean') {
+    return res.status(400).json({ message: 'isOn must be boolean.' })
+  }
+
+  const client = await pool.connect()
+
+  try {
+    const adminId = await assertAdminSession(sessionToken)
+    const adminResult = await query(
+      'SELECT username FROM admins WHERE id = $1 LIMIT 1',
+      [adminId]
+    )
+    const updatedByLabel = adminResult.rows[0]?.username || `admin:${adminId}`
+
+    await client.query('BEGIN')
+    const fanState = await setFanStateWithClient(client, {
+      isOn: req.body.isOn,
+      updatedByUserId: null,
+      updatedByLabel,
+      forceEvent: true,
+    })
+    await client.query('COMMIT')
+
+    return res.json(fanState)
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    const statusCode = error.statusCode || 500
+    return res.status(statusCode).json({
+      message: error.message || 'Failed to update fan state.',
+    })
+  } finally {
+    client.release()
+  }
+})
+
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found.' })
 })
