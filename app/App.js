@@ -16,7 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import MaterialCommunityIcons from './node_modules/expo/node_modules/@expo/vector-icons/MaterialCommunityIcons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   apiChangeUserPassword,
   apiGetFanStatus,
@@ -32,7 +32,7 @@ import {
   apiUserLogin,
   apiUserLogout,
 } from './src/api';
-import { clearSession, loadAppInstalled, loadSession, saveAppInstalled, saveSession } from './src/storage';
+import { clearSession, loadSession, saveSession } from './src/storage';
 
 const MENU_ITEMS = [
   { id: 'overview', label: 'Dashboard', icon: 'view-dashboard-outline' },
@@ -41,18 +41,6 @@ const MENU_ITEMS = [
   { id: 'settings', label: 'Settings', icon: 'cog-outline' },
 ];
 const APP_SENSOR_STALE_MS = 15000;
-
-function isStandaloneWebApp() {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') {
-    return false;
-  }
-
-  return (
-    window.matchMedia?.('(display-mode: standalone)').matches ||
-    window.matchMedia?.('(display-mode: fullscreen)').matches ||
-    window.navigator.standalone === true
-  );
-}
 
 function formatDateTime(value) {
   if (!value) return 'N/A';
@@ -157,87 +145,6 @@ function LoginScreen({ busy, error, onLogin }) {
             disabled={!canSubmit}
           >
             {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.primaryButtonText}>Log In</Text>}
-          </Pressable>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-function InstallGuideScreen({
-  installReady,
-  installBusy,
-  onInstall,
-  onSkip,
-}) {
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.installGuideScroll}>
-        <View style={styles.installGuideHero}>
-          <Image source={require('./assets/ptc-logo.png')} style={styles.installGuideLogo} />
-          <Text style={styles.installGuideEyebrow}>PTC User App</Text>
-          <Text style={styles.installGuideTitle}>Install the app before logging in.</Text>
-          <Text style={styles.installGuideLead}>
-            This app works as a PWA. Install it on your phone or desktop so it opens like a normal app.
-          </Text>
-        </View>
-
-        <View style={styles.installGuidePanel}>
-          <Text style={styles.installGuidePanelTitle}>Quick Steps</Text>
-          <View style={styles.installGuideStep}>
-            <Text style={styles.installGuideStepNumber}>1</Text>
-            <Text style={styles.installGuideStepText}>Tap the install button below or use your browser menu.</Text>
-          </View>
-          <View style={styles.installGuideStep}>
-            <Text style={styles.installGuideStepNumber}>2</Text>
-            <Text style={styles.installGuideStepText}>Add the app to your home screen or desktop.</Text>
-          </View>
-          <View style={styles.installGuideStep}>
-            <Text style={styles.installGuideStepNumber}>3</Text>
-            <Text style={styles.installGuideStepText}>After install, open the app from your home screen or desktop.</Text>
-          </View>
-        </View>
-
-        <View style={styles.installGuidePanel}>
-          <Text style={styles.installGuidePanelTitle}>Browser Guide</Text>
-          <Text style={styles.installGuidePlatformTitle}>Chrome or Edge on Desktop</Text>
-          <Text style={styles.installGuidePlatformText}>
-            Look for the install icon in the address bar, or open the browser menu and choose Install app.
-          </Text>
-
-          <Text style={styles.installGuidePlatformTitle}>Android Chrome</Text>
-          <Text style={styles.installGuidePlatformText}>
-            Open the three-dot menu, then tap Install app or Add to Home screen.
-          </Text>
-
-          <Text style={styles.installGuidePlatformTitle}>iPhone Safari</Text>
-          <Text style={styles.installGuidePlatformText}>
-            Tap Share, then choose Add to Home Screen.
-          </Text>
-        </View>
-
-        <View style={styles.installGuideActions}>
-          <Pressable
-            style={[
-              styles.primaryButton,
-              styles.installActionButton,
-              (!installReady || installBusy) && styles.disabledButton,
-            ]}
-            onPress={onInstall}
-            disabled={!installReady || installBusy}
-          >
-            {installBusy ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {installReady ? 'Install App' : 'Install Option Not Available Here'}
-              </Text>
-            )}
-          </Pressable>
-
-          <Pressable style={styles.installSkipButton} onPress={onSkip}>
-            <Text style={styles.installSkipButtonText}>Skip for now</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -1036,6 +943,7 @@ function MainScreen({
   currentPage,
   onNavigate,
   onViewNotification,
+  onMarkAllNotificationsRead,
   onToggleFan,
   profileForm,
   passwordForm,
@@ -1086,7 +994,7 @@ function MainScreen({
               notifications={notifications}
               viewedNotificationIds={viewedNotificationIds}
               onViewNotification={onViewNotification}
-              onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+              onMarkAllNotificationsRead={onMarkAllNotificationsRead}
             />
           ) : null}
           {currentPage === 'settings' ? (
@@ -1140,10 +1048,6 @@ function MainScreen({
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [auth, setAuth] = useState({ token: null });
-  const [showInstallGuide, setShowInstallGuide] = useState(() => !isStandaloneWebApp());
-  const [installReady, setInstallReady] = useState(false);
-  const [installBusy, setInstallBusy] = useState(false);
-  const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [profile, setProfile] = useState(null);
   const [globalLogs, setGlobalLogs] = useState([]);
   const [cameras, setCameras] = useState([]);
@@ -1233,8 +1137,6 @@ export default function App() {
   useEffect(() => {
     async function bootstrap() {
       try {
-        const appInstalled = await loadAppInstalled();
-        setShowInstallGuide(!(isStandaloneWebApp() || appInstalled));
         const session = await loadSession();
         if (!session?.token) {
           return;
@@ -1247,33 +1149,6 @@ export default function App() {
       }
     }
     bootstrap();
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') {
-      return undefined;
-    }
-
-    function handleBeforeInstallPrompt(event) {
-      event.preventDefault();
-      setInstallPromptEvent(event);
-      setInstallReady(true);
-    }
-
-    function handleAppInstalled() {
-      saveAppInstalled().catch(() => {});
-      setInstallPromptEvent(null);
-      setInstallReady(false);
-      setShowInstallGuide(false);
-    }
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
   }, []);
 
   useEffect(() => {
@@ -1396,6 +1271,7 @@ export default function App() {
       const result = await ImagePicker.launchImageLibraryAsync({
         allowsEditing: true,
         aspect: [1, 1],
+        base64: true,
         quality: 0.8,
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
       });
@@ -1449,8 +1325,9 @@ export default function App() {
       return false;
     }
 
+    let nextProfileImageUrl = payload.profileImageUrl;
+
     try {
-      let nextProfileImageUrl = payload.profileImageUrl;
 
       if (profile?.id && profileImageRemoved) {
         await apiRemoveUserProfilePhoto(profile.id);
@@ -1466,13 +1343,49 @@ export default function App() {
         ...payload,
         profileImageUrl: nextProfileImageUrl,
       });
-      setProfile(result.user);
+      const refreshedProfile = await refreshProfile(auth.token).catch(() => null);
+      const nextProfile = refreshedProfile || result.user || {
+        ...profile,
+        ...payload,
+        profileImageUrl: nextProfileImageUrl,
+      };
+
+      setProfile(nextProfile);
       setProfileImageDraft(null);
       setProfileImageRemoved(false);
-      await saveSession({ token: auth.token, user: result.user });
+      await saveSession({ token: auth.token, user: nextProfile });
       setSettingsFeedback({ type: 'success', text: 'Profile updated successfully.' });
       return true;
     } catch (error) {
+      const errorMessage = error?.message || 'Failed to update profile.';
+
+      if (/network request failed/i.test(errorMessage) && auth.token) {
+        try {
+          const refreshedProfile = await apiGetUserMe(auth.token);
+          const normalizedExpectedImage = nextProfileImageUrl || null;
+          const normalizedActualImage = refreshedProfile?.profileImageUrl || null;
+          const didProfilePersist =
+            refreshedProfile &&
+            refreshedProfile.firstName === payload.firstName &&
+            refreshedProfile.lastName === payload.lastName &&
+            refreshedProfile.username === payload.username &&
+            refreshedProfile.email === payload.email.toLowerCase() &&
+            normalizedActualImage === normalizedExpectedImage;
+
+          if (didProfilePersist) {
+            setProfile(refreshedProfile);
+            setProfileImageDraft(null);
+            setProfileImageRemoved(false);
+            await saveSession({ token: auth.token, user: refreshedProfile });
+            setSettingsFeedback({
+              type: 'success',
+              text: 'Profile updated successfully.',
+            });
+            return true;
+          }
+        } catch {}
+      }
+
       setSettingsFeedback({ type: 'error', text: error.message || 'Failed to update profile.' });
       return false;
     } finally {
@@ -1552,8 +1465,6 @@ export default function App() {
       await apiUserLogout(auth.token);
     } catch {}
     await clearSession();
-    const appInstalled = await loadAppInstalled();
-    setShowInstallGuide(!(isStandaloneWebApp() || appInstalled));
     setAuth({ token: null });
     setProfile(null);
     setGlobalLogs([]);
@@ -1591,31 +1502,6 @@ export default function App() {
     });
   }
 
-  async function handleInstallApp() {
-    if (!installPromptEvent) return;
-    setInstallBusy(true);
-
-    try {
-      await installPromptEvent.prompt();
-      if (installPromptEvent.userChoice) {
-        const choice = await installPromptEvent.userChoice;
-        if (choice?.outcome === 'accepted') {
-          await saveAppInstalled();
-          setShowInstallGuide(false);
-        }
-      }
-      setInstallPromptEvent(null);
-      setInstallReady(false);
-    } finally {
-      setInstallBusy(false);
-    }
-  }
-
-  async function handleSkipInstallGuide() {
-    await saveAppInstalled();
-    setShowInstallGuide(false);
-  }
-
   const profileImagePreviewUrl = profileImageRemoved
     ? ''
     : profileImageDraft?.uri || profileForm.profileImageUrl || profile?.profileImageUrl || '';
@@ -1633,17 +1519,6 @@ export default function App() {
   }
 
   if (!auth.token) {
-    if (showInstallGuide) {
-      return (
-        <InstallGuideScreen
-          installReady={installReady}
-          installBusy={installBusy}
-          onInstall={handleInstallApp}
-          onSkip={handleSkipInstallGuide}
-        />
-      );
-    }
-
     return (
       <LoginScreen
         busy={loginBusy}
@@ -1666,6 +1541,7 @@ export default function App() {
           currentPage={currentPage}
         onNavigate={setCurrentPage}
         onViewNotification={handleViewNotification}
+        onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
         onToggleFan={handleToggleFan}
       profileForm={profileForm}
       passwordForm={passwordForm}
@@ -1704,98 +1580,6 @@ const styles = StyleSheet.create({
   bootText: {
     color: '#567061',
     fontSize: 16,
-  },
-  installGuideScroll: {
-    flexGrow: 1,
-    paddingHorizontal: 18,
-    paddingTop: 28,
-    paddingBottom: 34,
-    backgroundColor: '#00653f',
-    gap: 16,
-  },
-  installGuideHero: {
-    alignItems: 'center',
-    paddingTop: 10,
-  },
-  installGuideLogo: {
-    width: 92,
-    height: 92,
-    marginBottom: 14,
-  },
-  installGuideEyebrow: {
-    color: '#d0f1dd',
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  installGuideTitle: {
-    color: '#ffffff',
-    fontSize: 30,
-    lineHeight: 36,
-    fontWeight: '800',
-    textAlign: 'center',
-    maxWidth: 360,
-  },
-  installGuideLead: {
-    marginTop: 12,
-    color: '#e6f7ec',
-    fontSize: 15,
-    textAlign: 'center',
-    maxWidth: 360,
-  },
-  installGuidePanel: {
-    backgroundColor: 'rgba(244, 251, 246, 0.98)',
-    borderRadius: 18,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#bfe0ca',
-    gap: 12,
-  },
-  installGuidePanelTitle: {
-    color: '#12412d',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  installGuideStep: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  installGuideStepNumber: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#1f8f4a',
-    color: '#ffffff',
-    fontWeight: '800',
-    textAlign: 'center',
-    lineHeight: 28,
-    overflow: 'hidden',
-  },
-  installGuideStepText: {
-    flex: 1,
-    color: '#426d58',
-    fontSize: 14,
-  },
-  installGuidePlatformTitle: {
-    color: '#12412d',
-    fontSize: 14,
-    fontWeight: '800',
-    marginTop: 2,
-  },
-  installGuidePlatformText: {
-    color: '#4f7a65',
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  installGuideActions: {
-    gap: 10,
-    marginTop: 4,
-  },
-  installActionButton: {
-    marginTop: 0,
   },
   loginRoot: {
     flexGrow: 1,
@@ -2162,21 +1946,6 @@ const styles = StyleSheet.create({
   faceCaptureActionButton: {
     flex: 1,
     marginTop: 0,
-  },
-  installSkipButton: {
-    marginTop: 12,
-    alignSelf: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(210, 234, 219, 0.35)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  installSkipButtonText: {
-    color: '#dff7e7',
-    fontSize: 13,
-    fontWeight: '700',
   },
   appContainer: {
     paddingTop: 14,

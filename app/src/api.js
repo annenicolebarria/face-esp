@@ -35,9 +35,54 @@ function mapProfile(row) {
   };
 }
 
+function decodeBase64ToArrayBuffer(base64) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const sanitized = String(base64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+
+  if (!sanitized) {
+    throw new Error('Selected image is invalid.');
+  }
+
+  const outputLength =
+    Math.floor((sanitized.length * 3) / 4) -
+    (sanitized.endsWith('==') ? 2 : sanitized.endsWith('=') ? 1 : 0);
+  const bytes = new Uint8Array(outputLength);
+
+  let buffer = 0;
+  let bits = 0;
+  let offset = 0;
+
+  for (let index = 0; index < sanitized.length; index += 1) {
+    const character = sanitized[index];
+    if (character === '=') {
+      break;
+    }
+
+    const value = alphabet.indexOf(character);
+    if (value < 0) {
+      continue;
+    }
+
+    buffer = (buffer << 6) | value;
+    bits += 6;
+
+    if (bits >= 8) {
+      bits -= 8;
+      bytes[offset] = (buffer >> bits) & 0xff;
+      offset += 1;
+    }
+  }
+
+  return bytes.buffer;
+}
+
 async function resolveUploadBody(asset) {
   if (asset?.file) {
     return asset.file;
+  }
+
+  if (asset?.base64) {
+    return decodeBase64ToArrayBuffer(asset.base64);
   }
 
   if (!asset?.uri) {
@@ -49,7 +94,7 @@ async function resolveUploadBody(asset) {
     throw new Error('Failed to read the selected image.');
   }
 
-  return response.blob();
+  return response.arrayBuffer();
 }
 
 function mapLog(row) {

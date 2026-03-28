@@ -107,6 +107,12 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') {
     return;
@@ -160,9 +166,10 @@ self.addEventListener('fetch', (event) => {
 `;
 
   await fs.writeFile(path.join(distDir, 'sw.js'), serviceWorker, 'utf8');
+  return cacheVersion;
 }
 
-async function patchHtml() {
+async function patchHtml(cacheVersion) {
   const htmlPath = path.join(distDir, 'index.html');
   let html = await fs.readFile(htmlPath, 'utf8');
 
@@ -189,7 +196,29 @@ async function patchHtml() {
       [
         '<script>',
         "if ('serviceWorker' in navigator) {",
-        "  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));",
+        '  window.addEventListener("load", async () => {',
+        `    const swUrl = "./sw.js?v=${cacheVersion}";`,
+        '    const registration = await navigator.serviceWorker.register(swUrl);',
+        '    const reloadForUpdate = () => {',
+        '      if (window.__ptcSwReloading) return;',
+        '      window.__ptcSwReloading = true;',
+        '      window.location.reload();',
+        '    };',
+        '    if (registration.waiting) {',
+        '      registration.waiting.postMessage({ type: "SKIP_WAITING" });',
+        '    }',
+        '    registration.addEventListener("updatefound", () => {',
+        '      const installing = registration.installing;',
+        '      if (!installing) return;',
+        '      installing.addEventListener("statechange", () => {',
+        '        if (installing.state === "installed" && navigator.serviceWorker.controller) {',
+        '          installing.postMessage({ type: "SKIP_WAITING" });',
+        '        }',
+        '      });',
+        '    });',
+        '    navigator.serviceWorker.addEventListener("controllerchange", reloadForUpdate);',
+        '    registration.update().catch(() => {});',
+        '  });',
         '}',
         '</script>',
         '</body>',
@@ -205,8 +234,8 @@ async function main() {
   await copyFile(path.join(iconSourceDir, 'pwa-icon-192.png'), path.join(iconOutputDir, 'icon-192.png'));
   await copyFile(path.join(iconSourceDir, 'pwa-icon-512.png'), path.join(iconOutputDir, 'icon-512.png'));
   await writeManifest();
-  await writeServiceWorker();
-  await patchHtml();
+  const cacheVersion = await writeServiceWorker();
+  await patchHtml(cacheVersion);
 }
 
 main().catch((error) => {
