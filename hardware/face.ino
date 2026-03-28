@@ -22,10 +22,10 @@ const char* DEVICE_KEY = "acebott-main-01";
 const int RELAY_ON = LOW;
 const int RELAY_OFF = HIGH;
 const unsigned long SENSOR_READ_INTERVAL_MS = 1500;
-const unsigned long SUPABASE_PUSH_INTERVAL_MS = 2000;
-const unsigned long FAN_STATE_PULL_INTERVAL_MS = 700;
+const unsigned long SUPABASE_PUSH_INTERVAL_MS = 5000;
+const unsigned long FAN_STATE_PULL_INTERVAL_MS = 4000;
 const unsigned long WIFI_RECONNECT_INTERVAL_MS = 10000;
-const uint16_t HTTP_TIMEOUT_MS = 1200;
+const uint16_t HTTP_TIMEOUT_MS = 8000;
 
 DHT dht(DHT_PIN, DHT_TYPE);
 Preferences preferences;
@@ -48,6 +48,17 @@ String wifiPassword;
 void pushToFaceApi(int pirState);
 void startConfigPortal();
 void stopConfigPortal();
+
+void logHttpResult(const char* label, int httpCode) {
+  Serial.print(label);
+  Serial.print(" HTTP ");
+  Serial.println(httpCode);
+  if (httpCode <= 0) {
+    Serial.print(label);
+    Serial.print(" ERROR ");
+    Serial.println(HTTPClient::errorToString(httpCode));
+  }
+}
 
 String htmlEscape(const String& input) {
   String output;
@@ -330,17 +341,18 @@ void pushToFaceApi(int pirState) {
     return;
   }
 
-  HTTPClient https;
+  WiFiClient client;
+  HTTPClient http;
   String url = String(FACE_API_BASE_URL) + "/api/device/sensor-logs";
 
-  if (!https.begin(url)) {
+  if (!http.begin(client, url)) {
     Serial.println("[DEVICE] Failed to open face-api connection");
     return;
   }
 
-  https.setTimeout(HTTP_TIMEOUT_MS);
-  https.addHeader("Content-Type", "application/json");
-  https.addHeader("x-device-token", DEVICE_SHARED_TOKEN);
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("x-device-token", DEVICE_SHARED_TOKEN);
 
   String payload = "{";
   payload += "\"device_key\":\"" + String(DEVICE_KEY) + "\",";
@@ -356,19 +368,18 @@ void pushToFaceApi(int pirState) {
   }
   payload += "}";
 
-  int httpCode = https.POST(payload);
+  int httpCode = http.POST(payload);
 
-  Serial.print("[DEVICE] HTTP ");
-  Serial.println(httpCode);
+  logHttpResult("[DEVICE]", httpCode);
 
   if (httpCode > 0) {
-    String response = https.getString();
+    String response = http.getString();
     if (response.length() > 0) {
       Serial.println(response);
     }
   }
 
-  https.end();
+  http.end();
 }
 
 bool fetchFanStateFromSupabase(bool& nextIsOn, String& updatedByLabel) {
@@ -376,29 +387,29 @@ bool fetchFanStateFromSupabase(bool& nextIsOn, String& updatedByLabel) {
     return false;
   }
 
-  HTTPClient https;
+  WiFiClient client;
+  HTTPClient http;
   String url = String(FACE_API_BASE_URL)
     + "/api/device/fan-state?deviceKey=" + String(DEVICE_KEY);
 
-  if (!https.begin(url)) {
+  if (!http.begin(client, url)) {
     Serial.println("[FAN] Failed to open face-api connection");
     return false;
   }
 
-  https.setTimeout(HTTP_TIMEOUT_MS);
-  https.addHeader("x-device-token", DEVICE_SHARED_TOKEN);
-  https.addHeader("Accept", "application/json");
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.addHeader("x-device-token", DEVICE_SHARED_TOKEN);
+  http.addHeader("Accept", "application/json");
 
-  int httpCode = https.GET();
+  int httpCode = http.GET();
   if (httpCode <= 0) {
-    Serial.print("[FAN] HTTP ");
-    Serial.println(httpCode);
-    https.end();
+    logHttpResult("[FAN]", httpCode);
+    http.end();
     return false;
   }
 
-  String response = https.getString();
-  https.end();
+  String response = http.getString();
+  http.end();
 
   if (response.indexOf("\"isOn\":true") >= 0) {
     nextIsOn = true;

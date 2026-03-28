@@ -43,8 +43,6 @@ services:
         value: ./captures/unrecognized
       - key: MATCH_THRESHOLD
         value: 0.50
-      - key: MAX_IMAGES_PER_PERSON
-        value: 4
       - key: MAX_IMAGE_DIMENSION
         value: 640
       - key: RECOGNITION_UPSAMPLE_TIMES

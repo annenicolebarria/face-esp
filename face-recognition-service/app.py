@@ -26,8 +26,8 @@ FACE_API_URL = os.getenv("FACE_API_URL", "http://localhost:4000").rstrip("/")
 CAMERA_SHARED_TOKEN = os.getenv("CAMERA_SHARED_TOKEN", "").strip()
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "640"))
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.50"))
-MAX_IMAGES_PER_PERSON = int(os.getenv("MAX_IMAGES_PER_PERSON", "4"))
 RECOGNITION_UPSAMPLE_TIMES = int(os.getenv("RECOGNITION_UPSAMPLE_TIMES", "1"))
+REMOTE_IMAGE_TIMEOUT_SECONDS = float(os.getenv("REMOTE_IMAGE_TIMEOUT_SECONDS", "5"))
 CORS_ORIGINS = [
   origin.strip()
   for origin in os.getenv(
@@ -47,6 +47,7 @@ def resolve_app_path(raw_path: str) -> Path:
 
 DATASET_DIR = resolve_app_path(os.getenv("DATASET_DIR", "./dataset"))
 UNKNOWN_SAVE_DIR = resolve_app_path(os.getenv("UNKNOWN_SAVE_DIR", "./captures/unrecognized"))
+ENCODING_CACHE_PATH = BASE_DIR / ".cache" / "encodings.json"
 
 
 @dataclass
@@ -82,10 +83,10 @@ def downscale_image(image: np.ndarray, max_dimension: int = MAX_IMAGE_DIMENSION)
   height, width = image.shape[:2]
   largest_dimension = max(height, width)
   if largest_dimension <= max_dimension:
-    return image
+    return np.ascontiguousarray(image)
 
   step = max(2, int(np.ceil(largest_dimension / max_dimension)))
-  return image[::step, ::step]
+  return np.ascontiguousarray(image[::step, ::step])
 
 
 def parse_user_folder(folder_name: str) -> tuple[Optional[int], str]:
@@ -100,6 +101,64 @@ def parse_user_folder(folder_name: str) -> tuple[Optional[int], str]:
     user_id = int(folder_name)
 
   return user_id, label
+
+
+def load_encoding_cache() -> dict[str, dict]:
+  try:
+    payload = json.loads(ENCODING_CACHE_PATH.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+      return payload
+  except Exception:
+    pass
+  return {}
+
+
+def save_encoding_cache(cache: dict[str, dict]) -> None:
+  ENCODING_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+  ENCODING_CACHE_PATH.write_text(json.dumps(cache), encoding="utf-8")
+
+
+def get_local_encoding_cache_key(image_path: Path) -> str:
+  return str(image_path.resolve())
+
+
+def get_local_encoding_cache_signature(image_path: Path) -> dict[str, int]:
+  stat = image_path.stat()
+  return {
+    "size": int(stat.st_size),
+    "mtimeNs": int(stat.st_mtime_ns),
+    "maxDimension": int(MAX_IMAGE_DIMENSION),
+  }
+
+
+def get_cached_local_face_encoding(cache: dict[str, dict], image_path: Path) -> Optional[np.ndarray]:
+  cache_key = get_local_encoding_cache_key(image_path)
+  cache_entry = cache.get(cache_key)
+  if not isinstance(cache_entry, dict):
+    return None
+
+  if any(cache_entry.get(key) != value for key, value in get_local_encoding_cache_signature(image_path).items()):
+    return None
+
+  encoding_payload = cache_entry.get("encoding")
+  if not isinstance(encoding_payload, list):
+    return None
+
+  try:
+    return np.array(encoding_payload, dtype=np.float64)
+  except Exception:
+    return None
+
+
+def set_cached_local_face_encoding(
+  cache: dict[str, dict],
+  image_path: Path,
+  encoding: np.ndarray,
+) -> None:
+  cache[get_local_encoding_cache_key(image_path)] = {
+    **get_local_encoding_cache_signature(image_path),
+    "encoding": encoding.tolist(),
+  }
 
 
 def fetch_remote_dataset_manifest() -> dict:
@@ -156,10 +215,13 @@ def fetch_remote_dataset_manifest() -> dict:
 def load_known_faces() -> dict[str, int]:
   loaded_faces: list[KnownFace] = []
   image_count = 0
+  cache = load_encoding_cache()
+  cache_dirty = False
+  cache_keys_in_use: set[str] = set()
   remote_manifest = fetch_remote_dataset_manifest()
   active_user_ids: set[int] = remote_manifest["activeUserIds"]
   remote_users: dict[int, dict] = remote_manifest["remoteUsers"]
-  remote_user_ids = set(remote_users.keys())
+  local_loaded_user_ids: set[int] = set()
 
   if not DATASET_DIR.exists():
     DATASET_DIR.mkdir(parents=True, exist_ok=True)
@@ -172,19 +234,19 @@ def load_known_faces() -> dict[str, int]:
     if user_id is not None:
       if active_user_ids and user_id not in active_user_ids:
         continue
-      if user_id in remote_user_ids:
-        continue
 
-    loaded_for_person = 0
-
+    local_image_count = 0
     for image_path in sorted(person_dir.iterdir()):
       if image_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
         continue
 
-      if loaded_for_person >= MAX_IMAGES_PER_PERSON:
-        break
-
-      encoding = extract_face_encoding(image_path)
+      cache_keys_in_use.add(get_local_encoding_cache_key(image_path))
+      encoding = get_cached_local_face_encoding(cache, image_path)
+      if encoding is None:
+        encoding = extract_face_encoding(image_path)
+        if encoding is not None:
+          set_cached_local_face_encoding(cache, image_path, encoding)
+          cache_dirty = True
       if encoding is None:
         continue
 
@@ -198,17 +260,19 @@ def load_known_faces() -> dict[str, int]:
           )
         )
         image_count += 1
-        loaded_for_person += 1
+        local_image_count += 1
       except Exception:
         continue
 
+    if user_id is not None and local_image_count > 0:
+      local_loaded_user_ids.add(user_id)
+
   for user_id, remote_user in sorted(remote_users.items()):
-    loaded_for_person = 0
+    if user_id in local_loaded_user_ids:
+      print(f"[DATASET] Using local dataset for user {user_id}; skipping remote URLs.")
+      continue
 
     for image_info in remote_user["images"]:
-      if loaded_for_person >= MAX_IMAGES_PER_PERSON:
-        break
-
       encoding = extract_remote_face_encoding(image_info["publicUrl"])
       if encoding is None:
         continue
@@ -223,13 +287,25 @@ def load_known_faces() -> dict[str, int]:
           )
         )
         image_count += 1
-        loaded_for_person += 1
       except Exception:
         continue
 
   with KNOWN_FACES_LOCK:
     KNOWN_FACES.clear()
     KNOWN_FACES.extend(loaded_faces)
+
+  stale_cache_keys = [
+    cache_key
+    for cache_key in cache.keys()
+    if cache_key.startswith(str(DATASET_DIR.resolve())) and cache_key not in cache_keys_in_use
+  ]
+  if stale_cache_keys:
+    for cache_key in stale_cache_keys:
+      cache.pop(cache_key, None)
+    cache_dirty = True
+
+  if cache_dirty:
+    save_encoding_cache(cache)
 
   persons = len({(face.user_id, face.label) for face in loaded_faces})
   return {"persons": persons, "images": image_count}
@@ -272,7 +348,7 @@ def extract_face_encoding(image_path: Path) -> Optional[np.ndarray]:
 
 def extract_remote_face_encoding(public_url: str) -> Optional[np.ndarray]:
   try:
-    response = requests.get(public_url, timeout=30)
+    response = requests.get(public_url, timeout=REMOTE_IMAGE_TIMEOUT_SECONDS)
     response.raise_for_status()
   except requests.RequestException as exc:
     print(f"[DATASET] Failed to download remote face image: {exc}")
@@ -306,7 +382,7 @@ def schedule_dataset_reload(wait: bool = False) -> None:
       stats = load_known_faces()
       print(
         f"[DATASET] Loaded {stats['images']} images across {stats['persons']} people "
-        f"(max {MAX_IMAGES_PER_PERSON}/person, max dimension {MAX_IMAGE_DIMENSION}px)"
+        f"(all valid images, max dimension {MAX_IMAGE_DIMENSION}px)"
       )
       update_dataset_state(
         loading=False,
@@ -431,6 +507,8 @@ async def recognize(
     image = face_recognition.load_image_file(io.BytesIO(image_bytes))
   except Exception as exc:
     raise HTTPException(status_code=400, detail=f"Invalid image payload: {exc}") from exc
+
+  image = downscale_image(image)
 
   face_locations = face_recognition.face_locations(
     image,

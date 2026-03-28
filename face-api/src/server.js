@@ -3,7 +3,9 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const bcrypt = require('bcryptjs')
+const fs = require('fs/promises')
 const multer = require('multer')
+const path = require('path')
 const { pool, query } = require('./db')
 const { signAdminToken, signUserToken, requireAuth, requireRole } = require('./auth')
 
@@ -24,9 +26,15 @@ const supabaseStorageApiKey = String(
 ).trim()
 const faceEnrollmentBucket = String(process.env.FACE_ENROLLMENT_BUCKET || 'face-enrollment').trim()
 const recognitionServiceUrl = String(
-  process.env.RECOGNITION_SERVICE_URL ||
-    (isProduction ? 'https://ptc-face-recognition.onrender.com' : 'http://127.0.0.1:8001')
+  process.env.RECOGNITION_SERVICE_URL || 'http://127.0.0.1:8001'
 ).replace(/\/+$/, '')
+const recognitionDatasetDir = path.resolve(
+  process.env.RECOGNITION_DATASET_DIR
+    ? path.isAbsolute(process.env.RECOGNITION_DATASET_DIR)
+      ? process.env.RECOGNITION_DATASET_DIR
+      : path.resolve(process.cwd(), process.env.RECOGNITION_DATASET_DIR)
+    : path.resolve(__dirname, '..', '..', 'face-recognition-service', 'dataset')
+)
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
@@ -72,6 +80,10 @@ function isValidStatus(status) {
 
 function isValidEvent(event) {
   return event === 'entry' || event === 'exit' || event === 'unrecognized'
+}
+
+function shouldPersistCamera(cameraId) {
+  return !/^debug-/i.test(String(cameraId || '').trim())
 }
 
 function requireCameraToken(req, res, next) {
@@ -173,6 +185,66 @@ async function uploadEnrollmentImageToStorage(storagePath, file) {
       payload || `Supabase storage upload failed with status ${response.status}.`
     )
   }
+}
+
+async function deleteEnrollmentImageFromStorage(storagePath) {
+  if (!supabaseStorageApiKey || !supabaseUrl || !storagePath) {
+    return false
+  }
+
+  const objectPath = encodeStorageObjectPath(storagePath)
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/${faceEnrollmentBucket}/${objectPath}`, {
+    method: 'DELETE',
+    headers: {
+      apikey: supabaseStorageApiKey,
+      Authorization: `Bearer ${supabaseStorageApiKey}`,
+    },
+  })
+
+  if (!response.ok && response.status !== 404) {
+    const payload = await response.text().catch(() => '')
+    throw new Error(
+      payload || `Supabase storage delete failed with status ${response.status}.`
+    )
+  }
+
+  return response.status !== 404
+}
+
+async function deleteLocalEnrollmentFolders(folderNames) {
+  const deletedFolders = []
+
+  for (const folderName of folderNames) {
+    const normalizedFolderName = String(folderName || '').trim()
+    if (
+      !normalizedFolderName ||
+      normalizedFolderName.includes('/') ||
+      normalizedFolderName.includes('\\')
+    ) {
+      continue
+    }
+
+    const folderPath = path.resolve(recognitionDatasetDir, normalizedFolderName)
+    const relativePath = path.relative(recognitionDatasetDir, folderPath)
+    if (
+      !relativePath ||
+      relativePath.startsWith('..') ||
+      path.isAbsolute(relativePath)
+    ) {
+      continue
+    }
+
+    try {
+      await fs.access(folderPath)
+    } catch {
+      continue
+    }
+
+    await fs.rm(folderPath, { recursive: true, force: true })
+    deletedFolders.push(normalizedFolderName)
+  }
+
+  return deletedFolders
 }
 
 async function assertAdminSession(sessionToken) {
@@ -299,11 +371,61 @@ async function removeEnrollmentDataset(userRow) {
     [userRow.id]
   )
 
+  const storagePaths = datasetRows.rows
+    .map((row) => String(row.storage_path || '').trim())
+    .filter(Boolean)
+  const folderNames = [...new Set([
+    buildDatasetFolderName(userRow),
+    ...storagePaths.map((storagePath) => storagePath.split('/')[0]),
+  ].filter(Boolean))]
+
   await query('DELETE FROM public.face_enrollment_images WHERE user_id = $1', [userRow.id])
 
-  return [...new Set(datasetRows.rows
-    .map((row) => String(row.storage_path || '').split('/')[0])
-    .filter(Boolean))]
+  for (const storagePath of storagePaths) {
+    try {
+      await deleteEnrollmentImageFromStorage(storagePath)
+    } catch (error) {
+      console.warn(`[DATASET] Failed to delete storage object ${storagePath}: ${error.message}`)
+    }
+  }
+
+  try {
+    await deleteLocalEnrollmentFolders(folderNames)
+  } catch (error) {
+    console.warn(`[DATASET] Failed to delete local dataset folder: ${error.message}`)
+  }
+
+  return folderNames
+}
+
+async function deleteUserAndDataset(userId) {
+  const userResult = await query(
+    `SELECT id, first_name, last_name, email, role
+     FROM public.users
+     WHERE id = $1
+     LIMIT 1`,
+    [userId]
+  )
+
+  if (!userResult.rowCount) {
+    return null
+  }
+
+  const userRow = userResult.rows[0]
+  const deletedFolders = await removeEnrollmentDataset(userRow)
+  const deleted = await query(
+    `DELETE FROM users
+     WHERE id = $1
+     RETURNING id, first_name AS "firstName", last_name AS "lastName", email, role`,
+    [userId]
+  )
+  const reloadResult = await reloadRecognitionDataset()
+
+  return {
+    user: deleted.rows[0],
+    deletedFolders,
+    reload: reloadResult,
+  }
 }
 
 async function getFaceEnrollmentDatasetManifest() {
@@ -349,7 +471,7 @@ async function getCameraSummaryRows() {
       c.camera_id AS "cameraId",
       c.area,
       CASE
-        WHEN COALESCE(logs.last_detected_at, c.last_seen_at) >= NOW() - INTERVAL '2 minutes'
+        WHEN COALESCE(logs.last_detected_at, c.last_seen_at) >= NOW() - INTERVAL '5 minutes'
           THEN 'online'
         ELSE 'offline'
       END AS status,
@@ -366,10 +488,11 @@ async function getCameraSummaryRows() {
         ) AS recognized_today,
         COUNT(*) FILTER (
           WHERE detected_at::date = CURRENT_DATE AND event = 'unrecognized'
-        ) AS unrecognized_today
+      ) AS unrecognized_today
       FROM attendance_logs
       GROUP BY camera_id
     ) logs ON logs.camera_id = c.camera_id
+    WHERE c.camera_id !~* '^debug-'
     ORDER BY c.camera_id ASC`
   )
 
@@ -558,15 +681,17 @@ async function insertAttendanceLog({
       [resolvedUser?.firstName, resolvedUser?.lastName].filter(Boolean).join(' ').trim() ||
       null
 
-    await client.query(
-      `INSERT INTO cameras (camera_id, area, status, last_seen_at)
-       VALUES ($1, 'Connected camera', 'online', COALESCE($2::timestamptz, NOW()))
-       ON CONFLICT (camera_id)
-       DO UPDATE SET
-         status = 'online',
-         last_seen_at = COALESCE($2::timestamptz, NOW())`,
-      [cameraId, detectedAt]
-    )
+    if (shouldPersistCamera(cameraId)) {
+      await client.query(
+        `INSERT INTO cameras (camera_id, area, status, last_seen_at)
+         VALUES ($1, 'Connected camera', 'online', COALESCE($2::timestamptz, NOW()))
+         ON CONFLICT (camera_id)
+         DO UPDATE SET
+           status = 'online',
+           last_seen_at = COALESCE($2::timestamptz, NOW())`,
+        [cameraId, detectedAt]
+      )
+    }
 
     const inserted = await client.query(
       `INSERT INTO attendance_logs (
@@ -607,6 +732,15 @@ async function insertAttendanceLog({
 }
 
 async function upsertCameraHeartbeat(cameraId, seenAt = null) {
+  if (!shouldPersistCamera(cameraId)) {
+    return {
+      cameraId,
+      area: 'Connected camera',
+      status: 'online',
+      lastSeenAt: seenAt || new Date().toISOString(),
+    }
+  }
+
   const result = await query(
     `INSERT INTO cameras (camera_id, area, status, last_seen_at)
      VALUES ($1, 'Connected camera', 'online', COALESCE($2::timestamptz, NOW()))
@@ -1379,20 +1513,17 @@ app.delete('/api/users/:id', ...requireAdmin, async (req, res) => {
   }
 
   try {
-    const deleted = await query(
-      `DELETE FROM users
-       WHERE id = $1
-       RETURNING id, first_name AS "firstName", last_name AS "lastName", email, role`,
-      [userId]
-    )
+    const result = await deleteUserAndDataset(userId)
 
-    if (!deleted.rowCount) {
+    if (!result) {
       return res.status(404).json({ message: 'User not found.' })
     }
 
     return res.json({
       message: 'User deleted successfully.',
-      user: deleted.rows[0],
+      user: result.user,
+      deletedFolders: result.deletedFolders,
+      reload: result.reload,
     })
   } catch (error) {
     return res.status(500).json({ message: 'Failed to delete user.', detail: error.message })
@@ -1677,18 +1808,13 @@ app.post('/api/admin/delete-user', async (req, res) => {
       return res.status(404).json({ message: 'User not found.' })
     }
 
-    const userRow = userResult.rows[0]
-    const deletedFolders = await removeEnrollmentDataset(userRow)
-
-    await query(`DELETE FROM public.users WHERE id = $1`, [userId])
-
-    const reloadResult = await reloadRecognitionDataset()
+    const result = await deleteUserAndDataset(userId)
 
     return res.json({
       ok: true,
       id: userId,
-      deletedFolders,
-      reload: reloadResult,
+      deletedFolders: result?.deletedFolders || [],
+      reload: result?.reload || { ok: false, error: 'Recognition dataset reload was skipped.' },
     })
   } catch (error) {
     const statusCode = error.statusCode || 500

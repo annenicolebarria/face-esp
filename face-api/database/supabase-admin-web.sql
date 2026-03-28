@@ -248,7 +248,7 @@ begin
     c.camera_id,
     c.area,
     case
-      when coalesce(logs.last_detected_at, c.last_seen_at) >= now() - interval '2 minutes'
+      when coalesce(logs.last_detected_at, c.last_seen_at) >= now() - interval '5 minutes'
         then 'online'
       else 'offline'
     end as status,

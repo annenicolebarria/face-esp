@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiClient.h>
 #include <HTTPClient.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -32,10 +33,10 @@ const char* CAMERA_ID = "ESP32-CAM-01";
 const char* FACE_API_BASE_URL = "http://192.168.0.9:4000";
 const char* CAMERA_SHARED_TOKEN = "ptc-camera-2026-03-26-H7mK4sQ8xP2cR9vL";
 const char* RECOGNITION_SERVICE_BASE_URL = "http://192.168.0.9:8001";
-const unsigned long RECOGNITION_PUSH_INTERVAL_MS = 2000;
-const unsigned long HEARTBEAT_INTERVAL_MS = 5000;
+const unsigned long RECOGNITION_PUSH_INTERVAL_MS = 3000;
+const unsigned long HEARTBEAT_INTERVAL_MS = 30000;
 const unsigned long WIFI_RECONNECT_INTERVAL_MS = 10000;
-const uint16_t HTTP_TIMEOUT_MS = 2500;
+const uint16_t HTTP_TIMEOUT_MS = 15000;
 
 WebServer server(80);
 Preferences preferences;
@@ -48,6 +49,19 @@ bool wifiConfigMode = false;
 bool serverStarted = false;
 String wifiSsid;
 String wifiPassword;
+
+void sendCameraHeartbeat();
+
+void logHttpResult(const char* label, int httpCode) {
+  Serial.print(label);
+  Serial.print(" HTTP ");
+  Serial.println(httpCode);
+  if (httpCode <= 0) {
+    Serial.print(label);
+    Serial.print(" ERROR ");
+    Serial.println(HTTPClient::errorToString(httpCode));
+  }
+}
 
 bool initCamera() {
   camera_config_t config;
@@ -70,7 +84,7 @@ bool initCamera() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_SVGA;
+  config.frame_size = FRAMESIZE_VGA;
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -201,6 +215,8 @@ bool connectWiFi(bool allowConfigFallback = true) {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("WiFi connected. IP: ");
     Serial.println(WiFi.localIP());
+    sendCameraHeartbeat();
+    lastHeartbeatAt = millis();
     return true;
   }
 
@@ -406,10 +422,11 @@ void uploadFrameForRecognition() {
     return;
   }
 
+  WiFiClient client;
   HTTPClient http;
   String url = String(RECOGNITION_SERVICE_BASE_URL) + "/recognize?camera_id=" + String(CAMERA_ID);
 
-  if (!http.begin(url)) {
+  if (!http.begin(client, url)) {
     Serial.println("[RECOGNITION] Failed to connect to service");
     esp_camera_fb_return(fb);
     return;
@@ -417,11 +434,12 @@ void uploadFrameForRecognition() {
 
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.addHeader("Content-Type", "image/jpeg");
+  Serial.print("[RECOGNITION] JPEG bytes: ");
+  Serial.println(fb->len);
   int httpCode = http.POST(fb->buf, fb->len);
   String response = httpCode > 0 ? http.getString() : "";
 
-  Serial.print("[RECOGNITION] HTTP ");
-  Serial.println(httpCode);
+  logHttpResult("[RECOGNITION]", httpCode);
   if (response.length() > 0) {
     Serial.println(response);
   }
@@ -435,10 +453,11 @@ void sendCameraHeartbeat() {
     return;
   }
 
+  WiFiClient client;
   HTTPClient http;
   String url = String(FACE_API_BASE_URL) + "/api/camera/heartbeat";
 
-  if (!http.begin(url)) {
+  if (!http.begin(client, url)) {
     Serial.println("[HEARTBEAT] Failed to connect to face-api");
     return;
   }
@@ -454,8 +473,7 @@ void sendCameraHeartbeat() {
   int httpCode = http.POST(payload);
   String response = httpCode > 0 ? http.getString() : "";
 
-  Serial.print("[HEARTBEAT] HTTP ");
-  Serial.println(httpCode);
+  logHttpResult("[HEARTBEAT]", httpCode);
   if (response.length() > 0) {
     Serial.println(response);
   }
@@ -491,6 +509,10 @@ void setup() {
   loadWiFiCredentials();
   connectWiFi(true);
   startServer();
+  if (WiFi.status() == WL_CONNECTED) {
+    sendCameraHeartbeat();
+    lastHeartbeatAt = millis();
+  }
 
   Serial.println("ESP32-CAM ready.");
   Serial.println("Send w = WiFi setup mode");

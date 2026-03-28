@@ -21,7 +21,7 @@ dataset/
 - The leading number is used as `user_id`.
 - The rest of the folder name becomes the user label.
 - If the numeric id is missing or outdated, the backend will still try to match the label against the user's full name.
-- Add 3 to 5 clear images per person.
+- Add as many clear images per person as needed.
 
 ## Environment
 
@@ -64,7 +64,7 @@ If you used the Windows installer, run:
 ## Dataset-only flow
 
 1. Create a folder per person inside `dataset/`.
-2. Put 3 to 5 clear face images in each folder.
+2. Put all clear face images for that person in the folder.
 3. Call `POST /reload-dataset` or restart the service.
 4. Let the ESP32-CAM keep sending frames to `/recognize`.
 
