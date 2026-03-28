@@ -248,7 +248,7 @@ begin
     c.camera_id,
     c.area,
     case
-      when coalesce(logs.last_detected_at, c.last_seen_at) >= now() - interval '30 seconds'
+      when coalesce(logs.last_detected_at, c.last_seen_at) >= now() - interval '2 minutes'
         then 'online'
       else 'offline'
     end as status,
@@ -300,7 +300,7 @@ begin
   return jsonb_build_object(
     'deviceKey', coalesce(sensor_row.device_key, 'acebott-main-01'),
     'pirState', coalesce(sensor_row.pir_state, false),
-    'fanIsOn', coalesce(sensor_row.fan_is_on, fan_row.is_on, false),
+    'fanIsOn', coalesce(fan_row.is_on, sensor_row.fan_is_on, false),
     'temperatureC', sensor_row.temperature_c,
     'humidity', sensor_row.humidity,
     'createdAt', sensor_row.created_at,
