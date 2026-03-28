@@ -195,6 +195,7 @@ async function reloadRecognitionDataset() {
   try {
     const response = await fetch(`${recognitionServiceUrl}/reload-dataset`, {
       method: 'POST',
+      signal: AbortSignal.timeout(5000),
     })
 
     if (!response.ok) {
@@ -210,6 +211,13 @@ async function reloadRecognitionDataset() {
       payload,
     }
   } catch (error) {
+    if (error?.name === 'TimeoutError') {
+      return {
+        ok: true,
+        queued: true,
+        warning: 'Recognition reload request timed out while the dataset is rebuilding in the background.',
+      }
+    }
     return {
       ok: false,
       error: `Recognition service unavailable: ${error.message}`,

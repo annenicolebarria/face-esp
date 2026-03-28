@@ -401,10 +401,10 @@ def health() -> dict:
 
 @app.post("/reload-dataset")
 def reload_dataset() -> dict:
-  schedule_dataset_reload(wait=True)
+  schedule_dataset_reload(wait=False)
   with DATASET_STATE_LOCK:
     state = dict(DATASET_STATE)
-  return {"ok": True, **state}
+  return {"ok": True, "queued": True, **state}
 
 
 @app.post("/recognize")

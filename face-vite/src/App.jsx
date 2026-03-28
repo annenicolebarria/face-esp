@@ -674,9 +674,11 @@ function App() {
         throw new Error(payload?.message || 'Failed to upload face enrollment images.')
       }
 
-      const reloadMessage = payload?.reload?.ok
-        ? 'Recognition dataset reloaded successfully.'
-        : payload?.reload?.error || 'Images uploaded, but recognition reload still needs attention.'
+      const reloadMessage = payload?.reload?.queued
+        ? payload?.reload?.warning || 'Images uploaded. Recognition dataset is reloading in the background.'
+        : payload?.reload?.ok
+          ? 'Recognition dataset reloaded successfully.'
+          : payload?.reload?.error || 'Images uploaded, but recognition reload still needs attention.'
 
       setEnrollmentFeedback({
         type: 'success',
@@ -685,7 +687,11 @@ function App() {
 
       await Swal.fire({
         icon: payload?.reload?.ok ? 'success' : 'warning',
-        title: payload?.reload?.ok ? 'Face enrollment saved' : 'Images saved with warning',
+        title: payload?.reload?.queued
+          ? 'Images saved and reload queued'
+          : payload?.reload?.ok
+            ? 'Face enrollment saved'
+            : 'Images saved with warning',
         text: `${payload.imagesSaved} images added for ${selectedEnrollmentUser.name}. Total dataset images: ${payload.totalImages}.`,
         confirmButtonColor: '#169c64',
       })
