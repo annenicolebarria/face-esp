@@ -268,7 +268,7 @@ function App() {
   const [searchUser, setSearchUser] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [logFilter, setLogFilter] = useState('recognized')
+  const [logFilter, setLogFilter] = useState('all')
 
   const [newUser, setNewUser] = useState({
     firstName: '',
@@ -496,11 +496,14 @@ function App() {
   }, [users, searchUser, roleFilter, statusFilter])
 
   const filteredLogs = useMemo(() => {
-    if (logFilter === 'recognized') {
-      return attendanceLogs
+    if (logFilter === 'all') {
+      return logs
     }
-    return attendanceLogs.filter((log) => log.event === logFilter)
-  }, [attendanceLogs, logFilter])
+    if (logFilter === 'recognized') {
+      return logs.filter((log) => log.event === 'entry' || log.event === 'exit')
+    }
+    return logs.filter((log) => log.event === logFilter)
+  }, [logs, logFilter])
 
   const reportCounts = useMemo(() => {
     const totals = {
@@ -978,7 +981,7 @@ function App() {
   const exportLogs = () => {
     const rows = [
       ['Time', 'Name', 'Event', 'Camera', 'Confidence'],
-      ...logs.map((log) => [log.time, log.name, log.event, log.camera, log.confidence]),
+      ...filteredLogs.map((log) => [log.time, log.name, log.event, log.camera, log.confidence]),
     ]
     exportCsv('attendance-logs-report.csv', rows)
   }
@@ -1882,9 +1885,9 @@ function App() {
               <h3>Attendance Logs</h3>
               <div className="filters">
                 <select value={logFilter} onChange={(event) => setLogFilter(event.target.value)}>
-                  <option value="recognized">Recognized only</option>
-                  <option value="entry">entry</option>
-                  <option value="exit">exit</option>
+                  <option value="all">All</option>
+                  <option value="recognized">Recognized</option>
+                  <option value="unrecognized">Unrecognized</option>
                 </select>
                 <button type="button" onClick={exportLogs}>
                   Export Logs CSV

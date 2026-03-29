@@ -107,11 +107,30 @@ if (contactForm && contactFeedback) {
   });
 }
 
-const backToTopLink = document.getElementById("footer-back-to-top");
+const topBar = document.querySelector(".top-bar");
+const inPageLinks = Array.from(document.querySelectorAll('a[href^="#"]'));
 
-if (backToTopLink) {
-  backToTopLink.addEventListener("click", (event) => {
+inPageLinks.forEach((link) => {
+  const targetSelector = link.getAttribute("href");
+  if (!targetSelector || targetSelector === "#") {
+    return;
+  }
+
+  link.addEventListener("click", (event) => {
+    const targetElement = document.querySelector(targetSelector);
+    if (!targetElement) {
+      return;
+    }
+
     event.preventDefault();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+
+    if (targetSelector === "#overview") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    const headerOffset = topBar ? topBar.offsetHeight + 12 : 12;
+    const targetTop = targetElement.getBoundingClientRect().top + window.scrollY - headerOffset;
+    window.scrollTo({ top: Math.max(targetTop, 0), behavior: "smooth" });
   });
-}
+});
